@@ -1,3 +1,5 @@
+import argparse
+import configparser
 import json
 import logging
 import os
@@ -5,6 +7,8 @@ import sys
 import re
 
 from ckanapi import RemoteCKAN
+
+_DEFAULT_CONFIG="ckan-explore.ini"
 
 def do_dataset_dump(ckan_connection, id):
     result = None
@@ -14,25 +18,38 @@ def do_dataset_dump(ckan_connection, id):
                                              data_dict=data_dict)
         print(json.dumps(result, indent=2))
     except Exception as e:
-        print('Failed to retrieve dataset.\n,Exception: %s'.format(e))
+        logging.exception(f'Failed to retrieve dataset {id}.')
  	
 if __name__ == '__main__':
 
-    url = os.getenv('CKAN_URL', None)
-    api_key = os.getenv('CKAN_KEY', None)
+    logging.basicConfig(level=os.environ.get("LOGLEVEL",logging.ERROR))
+    
+    ap = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
+        description='''Retrieve and print all the metadata for a specified dataset.''')
+    ap.add_argument('id', help='Identifier for the dataset to dump.')
+    ap.add_argument('-c','--config', help='Name of the configuration file to use.', default=_DEFAULT_CONFIG)
+    args = ap.parse_args()
+
+    cp = configparser.ConfigParser()
+    cp.read(args.config)
+
+    url = cp.get('remote','CKAN_URL', fallback=None)
+    api_key = cp.get('remote','CKAN_KEY', fallback=None)
+
+    # Set the logging level, looking first in the configuration file,
+    # then in the environment, and finally defaulting to logging only
+    # errors.
+    logging.basicConfig(level = cp.get('logging', 'LOGLEVEL', 
+        fallback = os.getenv('LOGLEVEL', logging.ERROR)))
+    
 
     errors = []
 
-    if not url:
-        errors.append('CKAN_URL environment variable is needed.')
-    if not api_key:
-        errors.append('CKAN_KEY environment variable is needed.')
+    if url is None:
+        errors.append(f'CKAN API URL not specified in configuration file {args.config}.')
+    if api_key is None:
+        logging.warning(f'CKAN API key not specified in configuration file {args.config}. Using anonymous access.')
 
-    if len(sys.argv) > 1:
-        id = sys.argv[1]
-    else:
-        errors.append('Provide a command line argument of the dataset identifier or name')
-        
     if len(errors):
         for e in errors:
             logging.error(e)
@@ -40,6 +57,6 @@ if __name__ == '__main__':
 
     remote_ckan = RemoteCKAN(address=url, apikey=api_key)
 
-    do_dataset_dump(remote_ckan, id)
+    do_dataset_dump(remote_ckan, args.id)
 
     
